@@ -1,0 +1,135 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load the Pacejka coefficients from CSV
+csv_path = "/Users/marcpiot/Documents/Github/tyre1_coefficients.csv"
+df = pd.read_csv(csv_path)
+
+def calculate_sigma_components(kappa, alpha):
+    """ Calculates the theoretical combined slip (sigma) and its components. """
+    sigma_x = -kappa / (1 + kappa)
+    sigma_y = -np.tan(np.radians(alpha)) / (1 + kappa)
+    sigma = np.sqrt(sigma_x**2 + sigma_y**2)
+
+    sigma_max = 1.0
+    sigma_star = sigma / sigma_max
+
+    return sigma_x, sigma_y, sigma, sigma_star
+
+def side_force(kappa, alpha, Fz, df):
+    """ Calculates Lateral Force (Fy) using Magic Formula and combined slip. """
+    
+    # Get slip components
+    sigma_x, sigma_y, sigma, sigma_star = calculate_sigma_components(kappa, alpha)
+
+    # Convert combined slip 'sigma' to an equivalent angle for the formula
+    if sigma == 0:
+        alpha_equiv = 0
+    else:
+        alpha_equiv = np.degrees(np.arctan(sigma))
+
+    # Retrieve coefficients for Fy (Table 2 & 3)
+    a1 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a1")]["Fy"].values[0]
+    a2 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a2")]["Fy"].values[0]
+    a3 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a3")]["Fy"].values[0]
+    a4 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a4")]["Fy"].values[0]
+    a5 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a5")]["Fy"].values[0]
+    a6 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a6")]["Fy"].values[0]
+    a7 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a7")]["Fy"].values[0]
+    a8 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a8")]["Fy"].values[0]
+    a9 = df[(df["Table"] == "Table 3") & (df["Coefficient"] == "a9")]["Fy"].values[0]
+    a10 = df[(df["Table"] == "Table 3") & (df["Coefficient"] == "a10")]["Fy"].values[0]
+    a11 = df[(df["Table"] == "Table 3") & (df["Coefficient"] == "a11")]["Fy"].values[0]
+    a12 = df[(df["Table"] == "Table 3") & (df["Coefficient"] == "a12")]["Fy"].values[0]
+    
+    # Convert Load to kN for the formula
+    Fz = Fz / 1000 
+
+    # Magic Formula Factors (Shape, Peak, Stiffness, Curvature)
+    C = 1.30
+    D = a1 * Fz**2 + a2 * Fz
+    B = ((a3 * np.sin(a4 * np.arctan(a5 * Fz))) / (C * D)) * (1 - a12)
+    E = a6 * Fz**2 + a7 * Fz + a8
+    delta_S_h = a9
+    delta_S_v = (a10 * np.power(Fz, 2) + a11 * Fz)
+
+    # Calculate Fy0 (Pure lateral force base) using equivalent alpha
+    X = alpha_equiv + delta_S_h
+    Phi = (1 - E) * X + (E / B) * np.arctan(B * X)
+    Fy0 = D * np.sin(C * np.arctan(B * Phi)) + delta_S_v
+
+    # Scale Fy based on the vector direction of the slip (Combined slip)
+    if sigma == 0:
+        Fy = 0
+    else:
+        Fy = -(sigma_y / sigma) * Fy0 
+
+    return Fy
+
+def break_force(kappa, alpha, Fz, df):
+    """ Calculates Longitudinal Force (Fx) using Magic Formula. """
+    
+    sigma_x = calculate_sigma_components(kappa, alpha)[0]
+    sigma = calculate_sigma_components(kappa, alpha)[2]
+    
+    # Retrieve coefficients for Fx (Table 2)
+    a1 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a1")]["Fx"].values[0]
+    a2 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a2")]["Fx"].values[0]
+    a3 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a3")]["Fx"].values[0]
+    a4 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a4")]["Fx"].values[0]
+    a5 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a5")]["Fx"].values[0]
+    a6 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a6")]["Fx"].values[0]
+    a7 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a7")]["Fx"].values[0]
+    a8 = df[(df["Table"] == "Table 2") & (df["Coefficient"] == "a8")]["Fx"].values[0]
+    
+    # Convert Load to kN
+    Fz = Fz / 1000
+    
+    # Magic Formula Factors
+    C = 1.65
+    D = a1 * Fz**2 + a2 * Fz
+    B = (a3 * Fz**2 + a4 * Fz) / (C * D * np.exp(a5 * Fz))
+    E = a6 * Fz**2 + a7 * Fz + a8
+    
+    # Calculate Fx0 (Pure longitudinal force base)
+    Phi = (1 - E) * kappa * 100 + (E / B) * np.arctan(B * kappa * 100)
+    Fx0 = D * np.sin(C * np.arctan(B * Phi))
+
+    # Scale Fx based on vector direction
+    if sigma == 0:
+        Fx = 0
+    else:
+        Fx = -(sigma_x / sigma) * Fx0 
+
+    return Fx
+
+# --- MAIN EXECUTION ---
+
+# Define simulation parameters
+load_cases = [2000, 4000, 6000, 8000]  # Vertical loads in Newtons
+alpha_fixed = 2                        # Fixed slip angle in degrees
+kappa_range = np.linspace(0, 1, 100)   # Longitudinal slip range (0 to 100%)
+
+# Initialize the Plot
+plt.figure(figsize=(12, 8))
+
+# Iterate through each load case (Fz)
+for Fz in load_cases:
+    # Calculate forces for the full range of kappa
+    Fy_values = [side_force(kappa, alpha_fixed, Fz, df) for kappa in kappa_range]
+    Fx_values = [break_force(kappa, alpha_fixed, Fz, df) for kappa in kappa_range]
+
+    # Plot curves (Solid line for Lateral, Dashed for Longitudinal)
+    plt.plot(kappa_range * 100, Fy_values, label=f"Fy : Fz={Fz} N")
+    plt.plot(kappa_range * 100, Fx_values, linestyle='--', label=f"Fx : Fz={Fz} N")
+
+# Finalize plot formatting
+plt.xlabel("Longitudinal slip κ (%)")
+plt.ylabel("Forces (N)")
+plt.title(f"Comparison of Forces Fx/Fy for different loads (α = {alpha_fixed}°)")
+plt.legend()
+plt.grid(True)
+
+# Display the final figure
+plt.show()
